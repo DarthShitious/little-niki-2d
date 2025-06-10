@@ -39,7 +39,7 @@ def plot_rig_roundtrip(rig_labels, inn_model, lengths, save_path=None, num_sampl
     rig_roundtripped_unpadded = unpad_rig(rig_roundtripped, len(lengths))
 
     for i in range(num_samples):
-        mae = np.abs(rig_labels - rig_roundtripped_unpadded).mean()
+        mae = np.abs(rig_labels[i] - rig_roundtripped_unpadded[i]).mean()
         plt.figure(figsize=(10, 10))
         plot_single_rig(rig_labels[i], lengths, title='Original Rig')
         plot_single_rig(rig_roundtripped_unpadded[i], lengths, title=f'Round-Tripped Rig | MAE: {mae:0.4f}')
@@ -74,7 +74,7 @@ def plot_rig_roundtrip_noise(rig_labels, inn_model, lengths, save_path=None, num
     rig_roundtripped_unpadded = unpad_rig(rig_roundtripped, len(lengths))
 
     for i in range(num_samples):
-        mae = np.abs(rig_labels - rig_roundtripped_unpadded).mean()
+        mae = np.abs(rig_labels[i] - rig_roundtripped_unpadded[i]).mean()
         plt.figure(figsize=(10, 10))
         plot_single_rig(rig_labels[i], lengths, title='Original Rig')
         plot_single_rig(rig_roundtripped_unpadded[i], lengths, title=f'Round-Tripped Rig w/ Noise | MAE: {mae:0.4f}')

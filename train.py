@@ -24,7 +24,7 @@ def main():
     lr = 1e-4
     weight_decay = 1e-4
     num_epochs = 1000
-    vis_interval = 10
+    vis_interval = 1
     seed = 42
 
     set_seed(seed)
@@ -59,9 +59,9 @@ def main():
 
     for epoch in range(1, num_epochs + 1):
         # --- Data ---
-        lengths = np.ones(num_segments, dtype=np.float32)
-        train_dataset = RandomRigDataset(num_samples=16384, num_segments=num_segments, lengths=lengths)
-        val_dataset = RandomRigDataset(num_samples=4096, num_segments=num_segments, lengths=lengths)
+        lengths = np.ones(num_segments, dtype=np.float32) * 0.1
+        train_dataset = RandomRigDataset(num_samples=16384*4, num_segments=num_segments, lengths=lengths)
+        val_dataset = RandomRigDataset(num_samples=4096*4, num_segments=num_segments, lengths=lengths)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
@@ -88,6 +88,7 @@ def main():
         total_val_loss = 0.0
         all_val_rig = []
         all_val_pred = []
+        all_val_label = []
         with torch.no_grad():
             for rig_batch, anchor_batch in tqdm(val_loader):
                 rig_batch = pad_rig(rig_batch, target_dim)
@@ -98,6 +99,7 @@ def main():
                 total_val_loss += loss.item()
                 all_val_rig.append(rig_batch.cpu().numpy())
                 all_val_pred.append(pred.cpu().numpy())
+                all_val_label.append(anchor_batch.cpu().numpy())
         avg_val_loss = total_val_loss / len(val_loader)
         val_losses.append(avg_val_loss)
 
@@ -112,6 +114,7 @@ def main():
         if epoch % vis_interval == 0 or epoch == num_epochs:
             val_rig = np.concatenate(all_val_rig, axis=0)
             val_pred = np.concatenate(all_val_pred, axis=0)
+            val_label = np.concatenate(all_val_label, axis=0)
             val_rig_unpadded = unpad_rig(val_rig, num_segments)
 
             epoch_dir = os.path.join(results_dir, f"{epoch:03d}")
@@ -134,9 +137,9 @@ def main():
                 elif plot_type == "rig_roundtrip_noise":
                     func(val_rig_unpadded, model, lengths, save_path=plot_dir, **kwargs)
                 elif plot_type == "hist":
-                    func(val_rig_unpadded, val_pred, save_path=plot_dir, **kwargs)
+                    func(val_label, val_pred, save_path=plot_dir, **kwargs)
                 elif plot_type == "scatter":
-                    func(val_rig_unpadded, val_pred, save_path=plot_dir, **kwargs)
+                    func(val_label, val_pred, save_path=plot_dir, **kwargs)
 
             # Loss curve at the root results_dir
             analysis.plot_loss_curves(train_losses, val_losses, save_path=results_dir)
