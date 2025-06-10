@@ -5,9 +5,9 @@ from FrEIA.modules import RNVPCouplingBlock, PermuteRandom
 
 def subnet_fc(in_ch, out_ch):
     return nn.Sequential(
-        nn.Linear(in_ch, 1024),
+        nn.Linear(in_ch, 512),
         nn.ReLU(),
-        nn.Linear(1024, out_ch)
+        nn.Linear(512, out_ch)
     )
 
 def build_inn(num_segments: int):

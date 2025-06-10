@@ -19,12 +19,12 @@ def set_seed(seed):
 
 def main():
     # --- Config ---
-    batch_size = 1024
+    batch_size = 128
     num_segments = 16
     lr = 1e-4
     weight_decay = 1e-4
     num_epochs = 1000
-    vis_interval = 1
+    vis_interval = 10
     seed = 42
 
     set_seed(seed)
@@ -35,12 +35,12 @@ def main():
     results_dir = os.path.join("results", f"{timestamp}")
     os.makedirs(results_dir, exist_ok=True)
 
-    # --- Data ---
-    lengths = np.ones(num_segments, dtype=np.float32)
-    train_dataset = RandomRigDataset(num_samples=1000000, num_segments=num_segments, lengths=lengths)
-    val_dataset = RandomRigDataset(num_samples=200000, num_segments=num_segments, lengths=lengths)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    # # --- Data ---
+    # lengths = np.ones(num_segments, dtype=np.float32)
+    # train_dataset = RandomRigDataset(num_samples=1000000, num_segments=num_segments, lengths=lengths)
+    # val_dataset = RandomRigDataset(num_samples=200000, num_segments=num_segments, lengths=lengths)
+    # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    # val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # --- Model ---
     model = build_inn(num_segments).to(device)
@@ -57,11 +57,18 @@ def main():
 
     target_dim = (num_segments + 1) * 4  # model input/output dim
 
-    for epoch in tqdm(range(1, num_epochs + 1)):
+    for epoch in range(1, num_epochs + 1):
+        # --- Data ---
+        lengths = np.ones(num_segments, dtype=np.float32)
+        train_dataset = RandomRigDataset(num_samples=16384, num_segments=num_segments, lengths=lengths)
+        val_dataset = RandomRigDataset(num_samples=4096, num_segments=num_segments, lengths=lengths)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
         # --- Training ---
         model.train()
         total_train_loss = 0.0
-        for rig_batch, anchor_batch in train_loader:
+        for rig_batch, anchor_batch in tqdm(train_loader):
             rig_batch = pad_rig(rig_batch, target_dim)
             rig_batch = rig_batch.to(device)
             anchor_batch = anchor_batch.to(device)
@@ -82,7 +89,7 @@ def main():
         all_val_rig = []
         all_val_pred = []
         with torch.no_grad():
-            for rig_batch, anchor_batch in val_loader:
+            for rig_batch, anchor_batch in tqdm(val_loader):
                 rig_batch = pad_rig(rig_batch, target_dim)
                 rig_batch = rig_batch.to(device)
                 anchor_batch = anchor_batch.to(device)
