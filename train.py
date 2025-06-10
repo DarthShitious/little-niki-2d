@@ -1,67 +1,278 @@
 import os
 import torch
-import numpy as np
-from torch.utils.data import DataLoader
+import torch.nn as nn
+import torch.optim as optim
 from torch.optim import AdamW
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+
+import numpy as np
 from datetime import datetime
 from tqdm import tqdm
+from typing import Optional, Dict
+from typing import Union, Callable
+import matplotlib.pyplot as plt
+from pathlib import Path
 
-from data import RandomRigDataset
-from models import build_inn
 import analysis
-from utils import pad_rig, unpad_rig
+from models import build_inn
+from data import RandomRigDataset
+from utils import pad_rig, unpad_rig, set_seed
 
-def set_seed(seed):
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+# Loss function type
+LossFn = Union[nn.Module, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]]
+
+
+
+class Trainer:
+
+    def __init__(
+        self,
+        config: Dict,
+        loss_function: LossFn,
+        model: nn.Module,
+        device: torch.device,
+        optimizer: optim.Optimizer,
+        scheduler: Optional[optim.lr_scheduler._LRScheduler] = None,
+        ) -> None:
+
+        self.config = config
+        self.loss_function = loss_function
+        self.model = model
+        self.device = device
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+
+        self.target_dim = (config["NUM_SEGMENTS"] + 1) * 4
+
+        self.train_losses = []
+        self.test_losses = []
+        self.epoch_train_preds = []
+        self.epoch_train_labels = []
+        self.epoch_test_preds = []
+        self.epoch_test_labels = []
+
+
+    def _run_epoch(self, dataloader: DataLoader, mode: str) -> None:
+        mode = mode.lower()
+
+        assert mode in ['train', 'test'], \
+            f"Invalid mode '{mode}'. Expected 'train' or 'test'."
+
+        is_train = (mode == 'train')
+        self.model.train() if is_train else self.model.eval()
+
+        total_loss = 0.0
+        with torch.enable_grad() if is_train else torch.no_grad():
+
+            for inputs, labels in tqdm(dataloader):
+
+                # Pad rigs to match anchor dimensions and put samples on device
+                rig_inputs = pad_rig(inputs, self.target_dim).to(self.device)
+                anchor_labels = labels.to(self.device)
+
+                # Zero gradients if training
+                if is_train:
+                    self.optimizer.zero_grad()
+
+                # Predict anchors and log jacobian determinant
+                anchor_preds, ljd = self.model(rig_inputs)
+
+                # Calculate loss (JUST MSE FOR NOW)
+                loss = self.loss_function(anchor_preds, anchor_labels)
+
+                # If training, calculate gradients and backpropagate
+                if is_train:
+                    loss.backward()
+                    self.optimizer.step()
+
+                # If scheduler exists, step it
+                if self.scheduler is not None:
+                    self.scheduler.step()
+
+                # Add to total loss
+                total_loss += loss.item()
+
+            # Detach and move to CPU
+                pred_np = anchor_preds.detach().cpu().numpy()
+                label_np = anchor_labels.detach().cpu().numpy()
+
+                if is_train:
+                    self.epoch_train_preds.append(pred_np)
+                    self.epoch_train_labels.append(label_np)
+                else:
+                    self.epoch_test_preds.append(pred_np)
+                    self.epoch_test_labels.append(label_np)
+
+        # Concatenate predictions and labels
+        if is_train:
+            self.epoch_train_preds = np.concatenate(self.epoch_train_preds, axis=0)
+            self.epoch_train_labels = np.concatenate(self.epoch_train_labels, axis=0)
+            self.train_losses.append(total_loss / len(dataloader))
+        else:
+            self.epoch_test_preds = np.concatenate(self.epoch_test_preds, axis=0)
+            self.epoch_test_labels = np.concatenate(self.epoch_test_labels, axis=0)
+            self.test_losses.append(total_loss / len(dataloader))
+
+
+    def train_epoch(self, dataloader: DataLoader) -> None:
+        self.epoch_train_preds = []
+        self.epoch_train_labels = []
+        self._run_epoch(dataloader=dataloader, mode="train")
+
+    def test_epoch(self, dataloader: DataLoader) -> None:
+        self.epoch_test_preds = []
+        self.epoch_test_labels = []
+        self._run_epoch(dataloader=dataloader, mode="test")
+
+    def plot_losses(self, save_dir: Optional[Path]=None) -> None:
+
+        fig = plt.figure(figsize=(20, 10))
+
+        plt.plot(
+            np.arange(0, len(self.train_losses)),
+            self.train_losses,
+            linewidth=2,
+            color='red',
+            label='Training Loss'
+        )
+
+        plt.plot(
+            np.arange(0, len(self.test_losses)),
+            self.test_losses,
+            linewidth=2,
+            color='cornflowerblue',
+            label='Testing Loss'
+        )
+
+        plt.grid("both")
+        plt.title("Loss History", fontsize=22)
+        plt.xlabel("Epoch", fontsize=18)
+        plt.ylabel("Loss", fontsize=18)
+
+        if save_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
+            filename = os.path.join(save_dir, 'loss_history.pong')
+            plt.savefig(filename)
+        else:
+            print("No save path defined!")
+            plt.show()
+
+        plt.close(fig)
+
+    def plot_scatter(self, save_dir: Optional[Path]=None):
+
+        def _scatter(preds, labels, prefix: str):
+            num_dims = preds.shape[1]
+            for d in range(num_dims):
+                fig, ax = plt.subplots(figsize=(10, 10))
+                ax.scatter(preds[:, d], labels[:, d], alpha=0.5, s=4, color='cornflowerblue')
+                ax.plot(
+                    [labels[:, d].min(), labels[:, d].max()],
+                    [labels[:, d].min(), labels[:, d].max()],
+                    'k--', lw=2
+                )
+                ax.set_title(f"{prefix.capitalize()} Scatter Plot - dim {d}")
+                ax.set_xlabel("Labels", fontsize=12)
+                ax.set_ylabel("Predicted")
+                ax.grid("Both")
+
+                if save_dir is not None:
+                    os.makedirs(save_dir, exist_ok=True)
+                    filename = os.path.join(save_dir, f"{prefix}_scatter_{d:03d}.png")
+                    plt.savefig(filename)
+                else:
+                    plt.show()
+
+                plt.close(fig)
+
+
+        if len(self.epoch_train_preds) and len(self.epoch_train_labels):
+            _scatter(self.epoch_train_preds, self.epoch_train_labels, "train")
+
+        if len(self.epoch_test_preds) and len(self.epoch_test_labels):
+            _scatter(self.epoch_test_preds, self.epoch_test_labels, "test")
+
+
+    # def plot_scatter(self):
+    #     if len(self.epoch_train_preds) and len(self.epoch_train_labels):
+    #         # TODO: implement train scatter plot
+    #         pass
+
+    #     if len(self.epoch_test_preds) and len(self.epoch_test_labels):
+    #         # TODO: implement test scatter plot
+    #         pass
+
+
+    @property
+    def train_preds(self):
+        return self.epoch_train_preds
+
+    @property
+    def train_labels(self):
+        return self.epoch_train_labels
+
+    @property
+    def test_preds(self):
+        return self.epoch_test_preds
+
+    @property
+    def test_labels(self):
+        return self.epoch_test_labels
+
+    def __repr__(self) -> str:
+        return f"Trainer(model={self.model.__class__.__name__}, device={self.device})"
+
 
 def main():
-    # --- Config ---
+    # Configuration
     batch_size = 128
-    num_segments = 16
+    train_size = 16384*4
+    test_size = 4096
+    num_segments = 128
     lr = 1e-4
     weight_decay = 1e-4
     num_epochs = 1000
     vis_interval = 1
-    seed = 42
+    seed = 1337
 
+    # For padding and unpadding
+    target_dim = (num_segments + 1) * 4  # model input/output dim
+
+    # Set seed
     set_seed(seed)
+
+    # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # --- Output directory ---
+    # Define output directory for results
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     results_dir = os.path.join("results", f"{timestamp}")
     os.makedirs(results_dir, exist_ok=True)
 
-    # # --- Data ---
-    # lengths = np.ones(num_segments, dtype=np.float32)
-    # train_dataset = RandomRigDataset(num_samples=1000000, num_segments=num_segments, lengths=lengths)
-    # val_dataset = RandomRigDataset(num_samples=200000, num_segments=num_segments, lengths=lengths)
-    # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    # val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-
-    # --- Model ---
+    # Instantiate model
     model = build_inn(num_segments).to(device)
     print(f"Learnable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
+    # Define optimizer
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    # Define loss function
     loss_fn = torch.nn.MSELoss()
 
+    # Get ready for training
     train_losses = []
     val_losses = []
-
     best_val_loss = float("inf")
     best_model_path = os.path.join(results_dir, "best_model.pt")
 
-    target_dim = (num_segments + 1) * 4  # model input/output dim
-
+    # Train
     for epoch in range(1, num_epochs + 1):
-        # --- Data ---
+
+        # Create epoch of data samples
         lengths = np.ones(num_segments, dtype=np.float32) * 0.1
-        train_dataset = RandomRigDataset(num_samples=16384*4, num_segments=num_segments, lengths=lengths)
-        val_dataset = RandomRigDataset(num_samples=4096*4, num_segments=num_segments, lengths=lengths)
+        train_dataset = RandomRigDataset(num_samples=train_size, num_segments=num_segments, lengths=lengths)
+        val_dataset = RandomRigDataset(num_samples=test_size, num_segments=num_segments, lengths=lengths)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
@@ -80,6 +291,7 @@ def main():
             optimizer.step()
 
             total_train_loss += loss.item()
+
         avg_train_loss = total_train_loss / len(train_loader)
         train_losses.append(avg_train_loss)
 
@@ -146,5 +358,3 @@ def main():
 
     print(f"Training complete! Best model saved at {best_model_path}")
 
-if __name__ == "__main__":
-    main()
