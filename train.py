@@ -4,6 +4,7 @@ import numpy as np
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from datetime import datetime
+from tqdm import tqdm
 
 from data import RandomRigDataset
 from models import build_inn
@@ -18,12 +19,12 @@ def set_seed(seed):
 
 def main():
     # --- Config ---
-    batch_size = 128
+    batch_size = 1024
     num_segments = 16
-    lr = 4e-4
+    lr = 1e-4
     weight_decay = 1e-4
-    num_epochs = 100
-    vis_interval = 10
+    num_epochs = 1000
+    vis_interval = 1
     seed = 42
 
     set_seed(seed)
@@ -36,8 +37,8 @@ def main():
 
     # --- Data ---
     lengths = np.ones(num_segments, dtype=np.float32)
-    train_dataset = RandomRigDataset(num_samples=10000, num_segments=num_segments, lengths=lengths)
-    val_dataset = RandomRigDataset(num_samples=2000, num_segments=num_segments, lengths=lengths)
+    train_dataset = RandomRigDataset(num_samples=1000000, num_segments=num_segments, lengths=lengths)
+    val_dataset = RandomRigDataset(num_samples=200000, num_segments=num_segments, lengths=lengths)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
@@ -56,7 +57,7 @@ def main():
 
     target_dim = (num_segments + 1) * 4  # model input/output dim
 
-    for epoch in range(1, num_epochs + 1):
+    for epoch in tqdm(range(1, num_epochs + 1)):
         # --- Training ---
         model.train()
         total_train_loss = 0.0
@@ -112,6 +113,7 @@ def main():
             plot_configs = [
                 ("rig_vs_pred", analysis.plot_rig_vs_predicted_anchor, dict(num_samples=3)),
                 ("rig_roundtrip", analysis.plot_rig_roundtrip, dict(num_samples=3)),
+                ("rig_roundtrip_noise", analysis.plot_rig_roundtrip_noise, dict(num_samples=3)),
                 ("hist", analysis.plot_histogram_labels_vs_preds, dict(title='Validation Rig')),
                 ("scatter", analysis.plot_scatter_labels_vs_preds, dict(title='Validation Rig'))
             ]
@@ -121,6 +123,8 @@ def main():
                 if plot_type == "rig_vs_pred":
                     func(val_rig_unpadded, val_pred, model, lengths, save_path=plot_dir, **kwargs)
                 elif plot_type == "rig_roundtrip":
+                    func(val_rig_unpadded, model, lengths, save_path=plot_dir, **kwargs)
+                elif plot_type == "rig_roundtrip_noise":
                     func(val_rig_unpadded, model, lengths, save_path=plot_dir, **kwargs)
                 elif plot_type == "hist":
                     func(val_rig_unpadded, val_pred, save_path=plot_dir, **kwargs)

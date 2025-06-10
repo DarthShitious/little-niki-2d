@@ -15,22 +15,18 @@ def plot_rig_vs_predicted_anchor(rig_labels, anchor_preds, inn_model, lengths, s
     rig_from_anchors_unpadded = unpad_rig(rig_from_anchors, len(lengths))
 
     for i in range(num_samples):
-        plt.figure(figsize=(6, 3))
-        plt.subplot(1, 2, 1)
-        plot_single_rig(rig_labels[i], lengths, title='Ground Truth Rig')
-        plt.subplot(1, 2, 2)
-        plot_single_rig(rig_from_anchors_unpadded[i], lengths, title='Predicted Rig (from anchor)')
+        mae = np.mean(np.abs(rig_labels[i] - rig_from_anchors_unpadded[i]))
+        plt.figure(figsize=(10, 10))
+        plot_single_rig(rig_labels[i], lengths, title='Label Rig')
+        plot_single_rig(rig_from_anchors_unpadded[i], lengths, title=f'Predicted Rig (from anchor) | MAE: {mae:0.4f}')
         plt.tight_layout()
         if save_path:
             plt.savefig(f"{save_path}/rig_vs_pred_{i}.png")
         plt.close()
-        # Debug: print MAE
-        mae = np.mean(np.abs(rig_labels[i] - rig_from_anchors_unpadded[i]))
-        print(f"Sample {i} MAE (GT vs. predicted rig): {mae:.6f}")
 
 def plot_rig_roundtrip(rig_labels, inn_model, lengths, save_path=None, num_samples=5):
     """
-    Plot: Label rig vectors vs. round-tripped rig vectors (rig -> anchor -> rig).
+    Plot: Label rig vectors vs. round-tripped rig vectors with noise injection (rig -> anchor + noise -> rig).
     """
     rig_labels_tensor = torch.from_numpy(rig_labels).float()
     device = next(inn_model.parameters()).device
@@ -43,14 +39,58 @@ def plot_rig_roundtrip(rig_labels, inn_model, lengths, save_path=None, num_sampl
     rig_roundtripped_unpadded = unpad_rig(rig_roundtripped, len(lengths))
 
     for i in range(num_samples):
-        plt.figure(figsize=(6, 3))
-        plt.subplot(1, 2, 1)
+        mae = np.abs(rig_labels - rig_roundtripped_unpadded).mean()
+        plt.figure(figsize=(10, 10))
         plot_single_rig(rig_labels[i], lengths, title='Original Rig')
-        plt.subplot(1, 2, 2)
-        plot_single_rig(rig_roundtripped_unpadded[i], lengths, title='Round-Tripped Rig')
+        plot_single_rig(rig_roundtripped_unpadded[i], lengths, title=f'Round-Tripped Rig | MAE: {mae:0.4f}')
+        ax = plt.gca()
+        ax.set_aspect('equal', adjustable='box')
+        # Set equal axis limits
+        xlims = ax.get_xlim()
+        ylims = ax.get_ylim()
+        min_lim = min(xlims[0], ylims[0])
+        max_lim = max(xlims[1], ylims[1])
+        ax.set_xlim(min_lim, max_lim)
+        ax.set_ylim(min_lim, max_lim)
         plt.tight_layout()
+        plt.grid("both")
         if save_path:
-            plt.savefig(f"{save_path}/rig_roundtrip_{i}.png")
+            plt.savefig(f"{save_path}/rig_roundtrip{i}.png")
+        plt.close()
+
+def plot_rig_roundtrip_noise(rig_labels, inn_model, lengths, save_path=None, num_samples=5):
+    """
+    Plot: Label rig vectors vs. round-tripped rig vectors with noise injection (rig -> anchor + noise -> rig).
+    """
+    rig_labels_tensor = torch.from_numpy(rig_labels).float()
+    device = next(inn_model.parameters()).device
+    rig_labels_tensor = rig_labels_tensor.to(device)
+    target_dim = (len(lengths) + 1) * 4
+    rig_labels_tensor_padded = pad_rig(rig_labels_tensor, target_dim)
+    anchor_preds = inn_model(rig_labels_tensor_padded)[0].detach().cpu().numpy()
+    anchor_preds += np.random.normal(0, 0.001, anchor_preds.shape)
+    rig_roundtripped, _ = inn_model.inverse(torch.from_numpy(anchor_preds).float().to(device))
+    rig_roundtripped = rig_roundtripped.detach().cpu().numpy()
+    rig_roundtripped_unpadded = unpad_rig(rig_roundtripped, len(lengths))
+
+    for i in range(num_samples):
+        mae = np.abs(rig_labels - rig_roundtripped_unpadded).mean()
+        plt.figure(figsize=(10, 10))
+        plot_single_rig(rig_labels[i], lengths, title='Original Rig')
+        plot_single_rig(rig_roundtripped_unpadded[i], lengths, title=f'Round-Tripped Rig w/ Noise | MAE: {mae:0.4f}')
+        ax = plt.gca()
+        ax.set_aspect('equal', adjustable='box')
+        # Set equal axis limits
+        xlims = ax.get_xlim()
+        ylims = ax.get_ylim()
+        min_lim = min(xlims[0], ylims[0])
+        max_lim = max(xlims[1], ylims[1])
+        ax.set_xlim(min_lim, max_lim)
+        ax.set_ylim(min_lim, max_lim)
+        plt.tight_layout()
+        plt.grid("both")
+        if save_path:
+            plt.savefig(f"{save_path}/rig_roundtrip_noise{i}.png")
         plt.close()
 
 def plot_single_rig(rig_vector, lengths, title=None):
@@ -96,13 +136,18 @@ def plot_scatter_labels_vs_preds(labels, preds, title='Scatter', save_path=None)
     if preds.shape[1] > num_dims:
         preds = unpad_rig(preds, num_dims)
     for i in range(num_dims):
+        mae = np.abs(preds[:, i] - labels[:, i]).mean()
         plt.figure()
-        plt.scatter(labels[:, i], preds[:, i], alpha=0.5)
+        plt.scatter(labels[:, i], preds[:, i], s=4)
         plt.xlabel('Label')
         plt.ylabel('Prediction')
-        plt.title(f'{title} (Dim {i})')
+        plt.title(f'{title} (Dim {i}) | MAE: {mae:0.4f}')
         plt.plot([labels[:, i].min(), labels[:, i].max()],
                  [labels[:, i].min(), labels[:, i].max()], 'k--', lw=1)
+        max_lim = np.max(np.abs([labels[:, i].max(), labels[:, i].min(), preds[:, i].max(), preds[:, i].min()]))
+        plt.xlim(-max_lim, max_lim)
+        plt.ylim(-max_lim, max_lim)
+        plt.grid("both")
         if save_path:
             plt.savefig(f"{save_path}/scatter_dim_{i}.png")
         plt.close()
@@ -118,6 +163,7 @@ def plot_loss_curves(train_losses, val_losses, save_path=None):
     plt.ylabel('Loss')
     plt.title('Loss Curves')
     plt.legend()
+    plt.grid("both")
     if save_path:
         plt.savefig(f"{save_path}/loss_curves.png")
     plt.close()
