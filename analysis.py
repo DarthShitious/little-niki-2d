@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import List
+
 from utils import pad_rig, unpad_rig
 
 def plot_rig_vs_predicted_anchor(rig_labels, anchor_preds, inn_model, lengths, save_path=None, num_samples=5):
@@ -93,6 +95,36 @@ def plot_rig_roundtrip_noise(rig_labels, inn_model, lengths, save_path=None, num
             plt.savefig(f"{save_path}/rig_roundtrip_noise{i}.png")
         plt.close()
 
+
+def plot_rigs(rigs: List, lengths, title=None, save_path=None):
+
+    if not isinstance(rigs, List):
+        rigs = [rigs]
+
+    rigs = [r.detach().cpu().numpy() for r in rigs]
+
+    fig = plt.figure(figsize=(10, 10))
+    for idx, rig_vector in enumerate(rigs):
+        N = len(lengths)
+        x, y = [0], [0]
+        angle = 0
+        for j in range(N):
+            angle += rig_vector[j]
+            x.append(x[-1] + lengths[j] * np.cos(angle))
+            y.append(y[-1] + lengths[j] * np.sin(angle))
+        plt.plot(x, y, '-o', linewidth=2, markersize=8, label=f"Rig {idx:d}")
+    plt.axis('equal')
+    if title:
+        plt.title(title)
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.legend()
+    if save_path is not None:
+        plt.savefig(save_path)
+    else:
+        plt.show()
+    plt.close(fig)
+
 def plot_single_rig(rig_vector, lengths, title=None):
     """
     Plot a single rig skeleton given rig angles and segment lengths.
@@ -110,6 +142,7 @@ def plot_single_rig(rig_vector, lengths, title=None):
         plt.title(title)
     plt.xlabel('x')
     plt.ylabel('y')
+    plt.show()
 
 def plot_histogram_labels_vs_preds(labels, preds, title='Histogram', save_path=None):
     """
