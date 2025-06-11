@@ -65,43 +65,47 @@ class Trainer:
         total_loss = 0.0
         with torch.enable_grad() if is_train else torch.no_grad():
 
-            for inputs, labels in tqdm(dataloader):
+            for rigs, anchors in tqdm(dataloader):
 
-                # Pad rigs to match anchor dimensions and put samples on device
-                rig_inputs = pad_rig(inputs, self.target_dim).to(self.device)
-                anchor_labels = labels.to(self.device)
+                # Put on device
+                rigs = rigs.to(self.device)
+                anchors = anchors.to(self.device)
 
                 # Zero gradients if training
                 if is_train:
                     self.optimizer.zero_grad()
 
-                # Predict anchors and log jacobian determinant
-                anchor_preds, ljd_fwd = self.model(rig_inputs)
+                # Inverse: predict rig vectors and error latent from anchor_labels (ignore ljd)
+                anchors_noisy = anchors + torch.randn_like(anchors) * 0.1
+                rig_inv_preds_and_errs, _ = self.model.inverse(anchors_noisy)
+                rig_inv_preds = rig_inv_preds_and_errs[:, :self.num_segments]
+                errs_inv = rig_inv_preds_and_errs[:, self.num_segments:]
+                loss_inv = self.loss_function.inverse_loss(rig_inv_preds, rigs)
+                
+                # Forward: predict anchors from rigs and error latent
+                anchors_fwd, _ = self.model(torch.concatenate([rig_inv_preds, errs_inv], axis=1))
+                loss_fwd = self.loss_function.forward_loss(anchors_fwd, anchors)
 
-                # Predict rigs from anchor predictions
-                rig_preds_error_latent, ljd_inv = self.model.inverse(anchor_preds)
+                # Independence: predicted rig vectors independent of error latent vectors
+                loss_ind = self.loss_function.independence_loss(rig_inv_preds, errs_inv)
 
-                # Split rig predictions from error latent vectors
-                rig_preds = rig_preds_error_latent[:, :self.num_segments]
-                error_latents = rig_preds_error_latent[:, self.num_segments:]
+                # Inverse boundary:
+                rig_inv_bnd_and_errs, _ = self.model.inverse(anchors)
+                rig_inv_bnd_preds = rig_inv_bnd_and_errs[:, :self.num_segments]
+                errs_inv_bnd = rig_inv_bnd_and_errs[:, self.num_segments:]
+                loss_inv_bnd = self.loss_function.inverse_boundary_loss(rig_inv_bnd_preds, rigs, errs_inv_bnd)
 
-                # Predict rigs from anchor labels
-                rig_bnd_inv_error_latent, ljd_bnd_inv = self.model.inverse(anchor_labels)
-                rig_bnd_inv = rig_bnd_inv_error_latent[:, :self.num_segments]
-                error_latents_bnd_inv = rig_bnd_inv_error_latent[:, self.num_segments:]
+                # Forward boundary:
+                anchor_fwd_bnd_preds, _ = self.model(pad_rig(rigs, self.target_dim))
+                loss_fwd_bnd = self.loss_function.forward_boundary_loss(anchor_fwd_bnd_preds, anchors)
 
-                # Calculate loss (NIKI LOSS UNDER CONSTRUCTION)
-                loss_fwd = self.loss_function.forward_loss(anchor_preds, anchor_labels)
-                loss_inv = self.loss_function.inverse_loss(rig_preds, rig_inputs[:, :self.num_segments])
-                loss_inv_bnd = self.loss_function.inverse_boundary_loss(rig_bnd_inv, rig_inputs[:, :self.num_segments], error_latents_bnd_inv)
-                loss_ind = self.loss_function.independence_loss(rig_preds, error_latents)
-
-                print(f"loss_fwd: {loss_fwd.item():.6f}, loss_inv: {loss_inv.item():.6f}, loss_inv_bnd: {loss_inv_bnd.item():.6f} loss_ind: {loss_ind.item():.6f}")
+                print(f"loss_fwd: {loss_fwd.item():.6f}, loss_inv: {loss_inv.item():.6f}, loss_ind: {loss_ind.item():.6f}, loss_inv_bnd: {loss_inv_bnd.item():.6f}, loss_fwd_bnd: {loss_fwd_bnd.item():.6f}")
 
                 loss = self.config["LAMBDA_FWD"] * loss_fwd + \
                        self.config["LAMBDA_INV"] * loss_inv + \
+                       self.config["LAMBDA_IND"] * loss_ind + \
                        self.config["LAMBDA_INV_BND"] * loss_inv_bnd + \
-                       self.config["LAMBDA_IND"] * loss_ind
+                       self.config["LAMBDA_FWD_BND"] * loss_fwd_bnd
 
                 # If training, calculate gradients and backpropagate
                 if is_train:
@@ -116,8 +120,8 @@ class Trainer:
                 total_loss += loss.item()
 
             # Detach and move to CPU
-                pred_np = anchor_preds.detach().cpu().numpy()
-                label_np = anchor_labels.detach().cpu().numpy()
+                pred_np = anchors_fwd.detach().cpu().numpy()
+                label_np = anchors.detach().cpu().numpy()
 
                 if is_train:
                     self.epoch_train_preds.append(pred_np)

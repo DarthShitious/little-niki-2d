@@ -5,9 +5,9 @@ from FrEIA.modules import RNVPCouplingBlock, PermuteRandom
 
 def subnet_fc(in_ch, out_ch):
     return nn.Sequential(
-        nn.Linear(in_ch, 512),
+        nn.Linear(in_ch, 1024),
         nn.ReLU(),
-        nn.Linear(512, out_ch)
+        nn.Linear(1024, out_ch)
     )
 
 def build_inn(num_segments: int):
@@ -20,7 +20,7 @@ def build_inn(num_segments: int):
     """
     dim = (num_segments + 1) * 4
     nodes = [InputNode(dim, name='input')]
-    for _ in range(6):
+    for _ in range(12):
         nodes.append(Node(nodes[-1], RNVPCouplingBlock, {'subnet_constructor': subnet_fc}))
         nodes.append(Node(nodes[-1], PermuteRandom, {'seed': 0}))
     nodes.append(OutputNode(nodes[-1], name='output'))
