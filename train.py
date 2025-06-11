@@ -110,6 +110,7 @@ class Trainer:
                 # If training, calculate gradients and backpropagate
                 if is_train:
                     loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.config.get("GRAD_CLIP", 5.0))
                     self.optimizer.step()
 
                 # If scheduler exists, step it
