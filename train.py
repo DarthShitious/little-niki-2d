@@ -257,7 +257,7 @@ class Trainer:
                 os.makedirs(save_dir, exist_ok=True)
                 filename = os.path.join(save_dir, f"rig_recon.png")
                 plt.savefig(filename)
-            plot_rigs(rigs=[rig_inputs[0], rig_recon[0], rig_fal[0]], lengths=lengths, save_path=filename)
+            plot_rigs(rigs=[rig_inputs[0], rig_recon[0], rig_fal[0], rig_noise[0]], lengths=lengths, save_path=filename)
 
             if save_dir is not None:
                 os.makedirs(save_dir, exist_ok=True)
