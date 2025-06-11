@@ -10,6 +10,7 @@ from utils import set_seed
 from train import Trainer
 from models import build_inn
 from data import RandomRigDataset
+from loss_functions import LittleNIKILoss
 
 
 
@@ -21,7 +22,7 @@ if __name__ == "__main__":
     os.makedirs(results_dir, exist_ok=True)
 
     # Open configuration
-    with open('config.yaml', 'w') as f:
+    with open('config.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     # Set the seed
@@ -45,7 +46,7 @@ if __name__ == "__main__":
     scheduler = None
 
     # Define loss function
-    loss_fn = torch.nn.MSELoss()
+    loss_fn = LittleNIKILoss(config)
 
     # Instantiate trainer
     trainer = Trainer(
@@ -90,7 +91,8 @@ if __name__ == "__main__":
         train_loader = DataLoader(
             train_dataset,
             batch_size=config["BATCH_SIZE"],
-            shuffle=True
+            shuffle=True,
+            num_workers=0
         )
 
         val_dataset = RandomRigDataset(
@@ -101,18 +103,22 @@ if __name__ == "__main__":
         val_loader = DataLoader(
             val_dataset,
             batch_size=config["BATCH_SIZE"],
-            shuffle=False
+            shuffle=False,
+            num_workers=0
         )
 
         # Training step
         trainer.train_epoch(dataloader=train_loader)
 
         # Validation step
-        trainer.validate_epoch(dataloader=val_loader)
+        trainer.test_epoch(dataloader=val_loader)
 
         # Analysis
         if epoch % config["ANALYSIS_INTERVAL"] == 0:
+            print("[INFO] Analyzing...")
 
             trainer.plot_losses(save_dir=results_dir)
 
-            trainer.plot_scatter(save_dir=os.path.join(results_dir, f"{epoch}:04d", "predlabel_scatter"))
+            trainer.plot_scatter(save_dir=os.path.join(results_dir, f"{epoch:04d}", "pred_label_scatter"))
+
+            trainer.plot_analysis(dataloader=val_loader, lengths=lengths, save_dir=os.path.join(results_dir, f"{epoch:04d}", "rigs"))

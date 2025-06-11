@@ -9,12 +9,11 @@ from torch.utils.data import DataLoader
 import numpy as np
 from datetime import datetime
 from tqdm import tqdm
-from typing import Optional, Dict
-from typing import Union, Callable
+from typing import Optional, Dict, Union, Callable, List
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-import analysis
+from analysis import plot_single_rig, plot_rigs
 from models import build_inn
 from data import RandomRigDataset
 from utils import pad_rig, unpad_rig, set_seed
@@ -43,7 +42,8 @@ class Trainer:
         self.optimizer = optimizer
         self.scheduler = scheduler
 
-        self.target_dim = (config["NUM_SEGMENTS"] + 1) * 4
+        self.num_segments = config["NUM_SEGMENTS"]
+        self.target_dim = (self.num_segments + 1) * 4
 
         self.train_losses = []
         self.test_losses = []
@@ -76,10 +76,18 @@ class Trainer:
                     self.optimizer.zero_grad()
 
                 # Predict anchors and log jacobian determinant
-                anchor_preds, ljd = self.model(rig_inputs)
+                anchor_preds, ljd_fwd = self.model(rig_inputs)
 
-                # Calculate loss (JUST MSE FOR NOW)
-                loss = self.loss_function(anchor_preds, anchor_labels)
+                # Predict rigs from anchor predictions
+                rig_preds_error_latent, ljd_inv = self.model.inverse(anchor_preds)
+
+                # Split rig predictions from error latent vectors
+                rig_preds = rig_preds_error_latent[:, :self.num_segments]
+                error_latents = rig_preds_error_latent[:, self.num_segments:]
+
+                # Calculate loss (NIKI LOSS UNDER CONSTRUCTION)
+                loss = self.loss_function.forward_loss(anchor_preds, anchor_labels) + \
+                       self.loss_function.inverse_loss(rig_preds, rig_inputs[:, :self.num_segments])
 
                 # If training, calculate gradients and backpropagate
                 if is_train:
@@ -104,23 +112,29 @@ class Trainer:
                     self.epoch_test_preds.append(pred_np)
                     self.epoch_test_labels.append(label_np)
 
+        # Calculate average loss
+        avg_loss = total_loss / len(dataloader)
+        print(f"Average loss: {avg_loss}")
+
         # Concatenate predictions and labels
         if is_train:
             self.epoch_train_preds = np.concatenate(self.epoch_train_preds, axis=0)
             self.epoch_train_labels = np.concatenate(self.epoch_train_labels, axis=0)
-            self.train_losses.append(total_loss / len(dataloader))
+            self.train_losses.append(avg_loss)
         else:
             self.epoch_test_preds = np.concatenate(self.epoch_test_preds, axis=0)
             self.epoch_test_labels = np.concatenate(self.epoch_test_labels, axis=0)
-            self.test_losses.append(total_loss / len(dataloader))
+            self.test_losses.append(avg_loss)
 
 
     def train_epoch(self, dataloader: DataLoader) -> None:
+        print("[INFO] Training...")
         self.epoch_train_preds = []
         self.epoch_train_labels = []
         self._run_epoch(dataloader=dataloader, mode="train")
 
     def test_epoch(self, dataloader: DataLoader) -> None:
+        print("[INFO] Testing...")
         self.epoch_test_preds = []
         self.epoch_test_labels = []
         self._run_epoch(dataloader=dataloader, mode="test")
@@ -152,7 +166,7 @@ class Trainer:
 
         if save_dir is not None:
             os.makedirs(save_dir, exist_ok=True)
-            filename = os.path.join(save_dir, 'loss_history.pong')
+            filename = os.path.join(save_dir, 'loss_history.png')
             plt.savefig(filename)
         else:
             print("No save path defined!")
@@ -162,7 +176,7 @@ class Trainer:
 
     def plot_scatter(self, save_dir: Optional[Path]=None):
 
-        def _scatter(preds, labels, prefix: str):
+        def _scatter(preds, labels, prefix: str, save_dir: str):
             num_dims = preds.shape[1]
             for d in range(num_dims):
                 fig, ax = plt.subplots(figsize=(10, 10))
@@ -172,9 +186,9 @@ class Trainer:
                     [labels[:, d].min(), labels[:, d].max()],
                     'k--', lw=2
                 )
-                ax.set_title(f"{prefix.capitalize()} Scatter Plot - dim {d}")
-                ax.set_xlabel("Labels", fontsize=12)
-                ax.set_ylabel("Predicted")
+                ax.set_title(f"{prefix.capitalize()} Scatter Plot: {d}")
+                ax.set_xlabel("Predictions", fontsize=12)
+                ax.set_ylabel("Labels", fontsize=12)
                 ax.grid("Both")
 
                 if save_dir is not None:
@@ -188,20 +202,37 @@ class Trainer:
 
 
         if len(self.epoch_train_preds) and len(self.epoch_train_labels):
-            _scatter(self.epoch_train_preds, self.epoch_train_labels, "train")
+            _scatter(self.epoch_train_preds, self.epoch_train_labels, "train", save_dir)
 
         if len(self.epoch_test_preds) and len(self.epoch_test_labels):
-            _scatter(self.epoch_test_preds, self.epoch_test_labels, "test")
+            _scatter(self.epoch_test_preds, self.epoch_test_labels, "test", save_dir)
+
+    def plot_analysis(self, dataloader: DataLoader, lengths: np.ndarray, save_dir: Optional[Path]=None) -> None:
+
+        self.model.eval()
+        
+        with torch.no_grad():
+
+            # Plot round trip
+            rig_inputs, anchor_labels = next(iter(dataloader))
+            anchor_preds, ljd_fwd = self.model(pad_rig(rig_inputs + torch.randn_like(rig_inputs)*0, self.target_dim).to(self.device))
+
+            rig_recon_latent_error, ljd_inv = self.model.inverse(anchor_preds)
+            rig_recon = rig_recon_latent_error[:, :self.num_segments]
+            error_latent = rig_recon_latent_error[:, self.num_segments:]
+
+            if save_dir is not None:
+                os.makedirs(save_dir, exist_ok=True)
+                filename = os.path.join(save_dir, f"rig_recon.png")
+                plt.savefig(filename)
+            plot_rigs(rigs=[rig_inputs[0], rig_recon[0]], lengths=lengths, save_path=filename)
 
 
-    # def plot_scatter(self):
-    #     if len(self.epoch_train_preds) and len(self.epoch_train_labels):
-    #         # TODO: implement train scatter plot
-    #         pass
 
-    #     if len(self.epoch_test_preds) and len(self.epoch_test_labels):
-    #         # TODO: implement test scatter plot
-    #         pass
+            # plot_single_rig(rig_inputs[0], lengths=lengths, save_path=os.path.join())
+
+            # plot_single_rig(rig_recon[0].cpu().detach().numpy(), lengths=lengths)
+
 
 
     @property
@@ -224,137 +255,137 @@ class Trainer:
         return f"Trainer(model={self.model.__class__.__name__}, device={self.device})"
 
 
-def main():
-    # Configuration
-    batch_size = 128
-    train_size = 16384*4
-    test_size = 4096
-    num_segments = 128
-    lr = 1e-4
-    weight_decay = 1e-4
-    num_epochs = 1000
-    vis_interval = 1
-    seed = 1337
+# def main():
+#     # Configuration
+#     batch_size = 128
+#     train_size = 16384*4
+#     test_size = 4096
+#     num_segments = 128
+#     lr = 1e-4
+#     weight_decay = 1e-4
+#     num_epochs = 1000
+#     vis_interval = 1
+#     seed = 1337
 
-    # For padding and unpadding
-    target_dim = (num_segments + 1) * 4  # model input/output dim
+#     # For padding and unpadding
+#     target_dim = (num_segments + 1) * 4  # model input/output dim
 
-    # Set seed
-    set_seed(seed)
+#     # Set seed
+#     set_seed(seed)
 
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     # Set device
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Define output directory for results
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    results_dir = os.path.join("results", f"{timestamp}")
-    os.makedirs(results_dir, exist_ok=True)
+#     # Define output directory for results
+#     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+#     results_dir = os.path.join("results", f"{timestamp}")
+#     os.makedirs(results_dir, exist_ok=True)
 
-    # Instantiate model
-    model = build_inn(num_segments).to(device)
-    print(f"Learnable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+#     # Instantiate model
+#     model = build_inn(num_segments).to(device)
+#     print(f"Learnable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-    # Define optimizer
-    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+#     # Define optimizer
+#     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # Define loss function
-    loss_fn = torch.nn.MSELoss()
+#     # Define loss function
+#     loss_fn = torch.nn.MSELoss()
 
-    # Get ready for training
-    train_losses = []
-    val_losses = []
-    best_val_loss = float("inf")
-    best_model_path = os.path.join(results_dir, "best_model.pt")
+#     # Get ready for training
+#     train_losses = []
+#     val_losses = []
+#     best_val_loss = float("inf")
+#     best_model_path = os.path.join(results_dir, "best_model.pt")
 
-    # Train
-    for epoch in range(1, num_epochs + 1):
+#     # Train
+#     for epoch in range(1, num_epochs + 1):
 
-        # Create epoch of data samples
-        lengths = np.ones(num_segments, dtype=np.float32) * 0.1
-        train_dataset = RandomRigDataset(num_samples=train_size, num_segments=num_segments, lengths=lengths)
-        val_dataset = RandomRigDataset(num_samples=test_size, num_segments=num_segments, lengths=lengths)
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+#         # Create epoch of data samples
+#         lengths = np.ones(num_segments, dtype=np.float32) * 0.1
+#         train_dataset = RandomRigDataset(num_samples=train_size, num_segments=num_segments, lengths=lengths)
+#         val_dataset = RandomRigDataset(num_samples=test_size, num_segments=num_segments, lengths=lengths)
+#         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+#         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-        # --- Training ---
-        model.train()
-        total_train_loss = 0.0
-        for rig_batch, anchor_batch in tqdm(train_loader):
-            rig_batch = pad_rig(rig_batch, target_dim)
-            rig_batch = rig_batch.to(device)
-            anchor_batch = anchor_batch.to(device)
+#         # --- Training ---
+#         model.train()
+#         total_train_loss = 0.0
+#         for rig_batch, anchor_batch in tqdm(train_loader):
+#             rig_batch = pad_rig(rig_batch, target_dim)
+#             rig_batch = rig_batch.to(device)
+#             anchor_batch = anchor_batch.to(device)
 
-            optimizer.zero_grad()
-            pred, _ = model(rig_batch)
-            loss = loss_fn(pred, anchor_batch)
-            loss.backward()
-            optimizer.step()
+#             optimizer.zero_grad()
+#             pred, _ = model(rig_batch)
+#             loss = loss_fn(pred, anchor_batch)
+#             loss.backward()
+#             optimizer.step()
 
-            total_train_loss += loss.item()
+#             total_train_loss += loss.item()
 
-        avg_train_loss = total_train_loss / len(train_loader)
-        train_losses.append(avg_train_loss)
+#         avg_train_loss = total_train_loss / len(train_loader)
+#         train_losses.append(avg_train_loss)
 
-        # --- Validation ---
-        model.eval()
-        total_val_loss = 0.0
-        all_val_rig = []
-        all_val_pred = []
-        all_val_label = []
-        with torch.no_grad():
-            for rig_batch, anchor_batch in tqdm(val_loader):
-                rig_batch = pad_rig(rig_batch, target_dim)
-                rig_batch = rig_batch.to(device)
-                anchor_batch = anchor_batch.to(device)
-                pred, _ = model(rig_batch)
-                loss = loss_fn(pred, anchor_batch)
-                total_val_loss += loss.item()
-                all_val_rig.append(rig_batch.cpu().numpy())
-                all_val_pred.append(pred.cpu().numpy())
-                all_val_label.append(anchor_batch.cpu().numpy())
-        avg_val_loss = total_val_loss / len(val_loader)
-        val_losses.append(avg_val_loss)
+#         # --- Validation ---
+#         model.eval()
+#         total_val_loss = 0.0
+#         all_val_rig = []
+#         all_val_pred = []
+#         all_val_label = []
+#         with torch.no_grad():
+#             for rig_batch, anchor_batch in tqdm(val_loader):
+#                 rig_batch = pad_rig(rig_batch, target_dim)
+#                 rig_batch = rig_batch.to(device)
+#                 anchor_batch = anchor_batch.to(device)
+#                 pred, _ = model(rig_batch)
+#                 loss = loss_fn(pred, anchor_batch)
+#                 total_val_loss += loss.item()
+#                 all_val_rig.append(rig_batch.cpu().numpy())
+#                 all_val_pred.append(pred.cpu().numpy())
+#                 all_val_label.append(anchor_batch.cpu().numpy())
+#         avg_val_loss = total_val_loss / len(val_loader)
+#         val_losses.append(avg_val_loss)
 
-        print(f"Epoch {epoch:03d} | Train Loss: {avg_train_loss:.6f} | Val Loss: {avg_val_loss:.6f}")
+#         print(f"Epoch {epoch:03d} | Train Loss: {avg_train_loss:.6f} | Val Loss: {avg_val_loss:.6f}")
 
-        # --- Save best model ---
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), best_model_path)
+#         # --- Save best model ---
+#         if avg_val_loss < best_val_loss:
+#             best_val_loss = avg_val_loss
+#             torch.save(model.state_dict(), best_model_path)
 
-        # --- Organized Visualization ---
-        if epoch % vis_interval == 0 or epoch == num_epochs:
-            val_rig = np.concatenate(all_val_rig, axis=0)
-            val_pred = np.concatenate(all_val_pred, axis=0)
-            val_label = np.concatenate(all_val_label, axis=0)
-            val_rig_unpadded = unpad_rig(val_rig, num_segments)
+#         # --- Organized Visualization ---
+#         if epoch % vis_interval == 0 or epoch == num_epochs:
+#             val_rig = np.concatenate(all_val_rig, axis=0)
+#             val_pred = np.concatenate(all_val_pred, axis=0)
+#             val_label = np.concatenate(all_val_label, axis=0)
+#             val_rig_unpadded = unpad_rig(val_rig, num_segments)
 
-            epoch_dir = os.path.join(results_dir, f"{epoch:03d}")
+#             epoch_dir = os.path.join(results_dir, f"{epoch:03d}")
 
-            # Plot types and their directories
-            plot_configs = [
-                ("rig_vs_pred", analysis.plot_rig_vs_predicted_anchor, dict(num_samples=3)),
-                ("rig_roundtrip", analysis.plot_rig_roundtrip, dict(num_samples=3)),
-                ("rig_roundtrip_noise", analysis.plot_rig_roundtrip_noise, dict(num_samples=3)),
-                ("hist", analysis.plot_histogram_labels_vs_preds, dict(title='Validation Rig')),
-                ("scatter", analysis.plot_scatter_labels_vs_preds, dict(title='Validation Rig'))
-            ]
-            for plot_type, func, kwargs in plot_configs:
-                plot_dir = os.path.join(epoch_dir, plot_type)
-                os.makedirs(plot_dir, exist_ok=True)
-                if plot_type == "rig_vs_pred":
-                    func(val_rig_unpadded, val_pred, model, lengths, save_path=plot_dir, **kwargs)
-                elif plot_type == "rig_roundtrip":
-                    func(val_rig_unpadded, model, lengths, save_path=plot_dir, **kwargs)
-                elif plot_type == "rig_roundtrip_noise":
-                    func(val_rig_unpadded, model, lengths, save_path=plot_dir, **kwargs)
-                elif plot_type == "hist":
-                    func(val_label, val_pred, save_path=plot_dir, **kwargs)
-                elif plot_type == "scatter":
-                    func(val_label, val_pred, save_path=plot_dir, **kwargs)
+#             # Plot types and their directories
+#             plot_configs = [
+#                 ("rig_vs_pred", analysis.plot_rig_vs_predicted_anchor, dict(num_samples=3)),
+#                 ("rig_roundtrip", analysis.plot_rig_roundtrip, dict(num_samples=3)),
+#                 ("rig_roundtrip_noise", analysis.plot_rig_roundtrip_noise, dict(num_samples=3)),
+#                 ("hist", analysis.plot_histogram_labels_vs_preds, dict(title='Validation Rig')),
+#                 ("scatter", analysis.plot_scatter_labels_vs_preds, dict(title='Validation Rig'))
+#             ]
+#             for plot_type, func, kwargs in plot_configs:
+#                 plot_dir = os.path.join(epoch_dir, plot_type)
+#                 os.makedirs(plot_dir, exist_ok=True)
+#                 if plot_type == "rig_vs_pred":
+#                     func(val_rig_unpadded, val_pred, model, lengths, save_path=plot_dir, **kwargs)
+#                 elif plot_type == "rig_roundtrip":
+#                     func(val_rig_unpadded, model, lengths, save_path=plot_dir, **kwargs)
+#                 elif plot_type == "rig_roundtrip_noise":
+#                     func(val_rig_unpadded, model, lengths, save_path=plot_dir, **kwargs)
+#                 elif plot_type == "hist":
+#                     func(val_label, val_pred, save_path=plot_dir, **kwargs)
+#                 elif plot_type == "scatter":
+#                     func(val_label, val_pred, save_path=plot_dir, **kwargs)
 
-            # Loss curve at the root results_dir
-            analysis.plot_loss_curves(train_losses, val_losses, save_path=results_dir)
+#             # Loss curve at the root results_dir
+#             analysis.plot_loss_curves(train_losses, val_losses, save_path=results_dir)
 
-    print(f"Training complete! Best model saved at {best_model_path}")
+#     print(f"Training complete! Best model saved at {best_model_path}")
 
