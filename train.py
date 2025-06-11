@@ -198,6 +198,7 @@ class Trainer:
     def plot_scatter(self, save_dir: Optional[Path]=None):
 
         def _scatter(preds, labels, prefix: str, save_dir: str):
+            maxlim = np.max(np.abs([preds.max(), preds.min(), labels.max(), labels.min()]))
             num_dims = preds.shape[1]
             for d in range(num_dims):
                 fig, ax = plt.subplots(figsize=(10, 10))
@@ -210,6 +211,8 @@ class Trainer:
                 ax.set_title(f"{prefix.capitalize()} Scatter Plot: {d}")
                 ax.set_xlabel("Predictions", fontsize=12)
                 ax.set_ylabel("Labels", fontsize=12)
+                ax.set_xlim(-maxlim, maxlim)
+                ax.set_ylim(-maxlim, maxlim)
                 ax.grid("Both")
 
                 if save_dir is not None:
