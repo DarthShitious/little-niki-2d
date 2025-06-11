@@ -217,15 +217,20 @@ class Trainer:
             rig_inputs, anchor_labels = next(iter(dataloader))
             anchor_preds, ljd_fwd = self.model(pad_rig(rig_inputs + torch.randn_like(rig_inputs)*0, self.target_dim).to(self.device))
 
+            rig_fal_latent_error, ljd_fal = self.model.inverse(anchor_labels.to(self.device))
+            rig_fal = rig_fal_latent_error[:, :self.num_segments]
+            error_latent_fal = rig_fal_latent_error[:, self.num_segments:]
+
+
             rig_recon_latent_error, ljd_inv = self.model.inverse(anchor_preds)
             rig_recon = rig_recon_latent_error[:, :self.num_segments]
-            error_latent = rig_recon_latent_error[:, self.num_segments:]
+            error_latent_recon = rig_recon_latent_error[:, self.num_segments:]
 
             if save_dir is not None:
                 os.makedirs(save_dir, exist_ok=True)
                 filename = os.path.join(save_dir, f"rig_recon.png")
                 plt.savefig(filename)
-            plot_rigs(rigs=[rig_inputs[0], rig_recon[0]], lengths=lengths, save_path=filename)
+            plot_rigs(rigs=[rig_inputs[0], rig_recon[0], rig_fal[0]], lengths=lengths, save_path=filename)
 
 
 
