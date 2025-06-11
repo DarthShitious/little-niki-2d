@@ -85,9 +85,23 @@ class Trainer:
                 rig_preds = rig_preds_error_latent[:, :self.num_segments]
                 error_latents = rig_preds_error_latent[:, self.num_segments:]
 
+                # Predict rigs from anchor labels
+                rig_bnd_inv_error_latent, ljd_bnd_inv = self.model.inverse(anchor_labels)
+                rig_bnd_inv = rig_bnd_inv_error_latent[:, :self.num_segments]
+                error_latents_bnd_inv = rig_bnd_inv_error_latent[:, self.num_segments:]
+
                 # Calculate loss (NIKI LOSS UNDER CONSTRUCTION)
-                loss = self.loss_function.forward_loss(anchor_preds, anchor_labels) + \
-                       self.loss_function.inverse_loss(rig_preds, rig_inputs[:, :self.num_segments])
+                loss_fwd = self.loss_function.forward_loss(anchor_preds, anchor_labels)
+                loss_inv = self.loss_function.inverse_loss(rig_preds, rig_inputs[:, :self.num_segments])
+                loss_inv_bnd = self.loss_function.inverse_boundary_loss(rig_bnd_inv, rig_inputs[:, :self.num_segments], error_latents_bnd_inv)
+                loss_ind = self.loss_function.independence_loss(rig_preds, error_latents)
+
+                print(f"loss_fwd: {loss_fwd.item():.6f}, loss_inv: {loss_inv.item():.6f}, loss_inv_bnd: {loss_inv_bnd.item():.6f} loss_ind: {loss_ind.item():.6f}")
+
+                loss = self.config["LAMBDA_FWD"] * loss_fwd + \
+                       self.config["LAMBDA_INV"] * loss_inv + \
+                       self.config["LAMBDA_INV_BND"] * loss_inv_bnd + \
+                       self.config["LAMBDA_IND"] * loss_ind
 
                 # If training, calculate gradients and backpropagate
                 if is_train:

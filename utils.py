@@ -17,3 +17,27 @@ def pad_rig(rig_batch: torch.Tensor, target_dim: int) -> torch.Tensor:
 
 def unpad_rig(rig_padded: np.ndarray, true_dim: int) -> np.ndarray:
     return rig_padded[:, :true_dim]
+
+def maximum_mean_discrepancy(x: torch.Tensor, y: torch.Tensor, kernel='rbf', sigma=1.0) -> torch.Tensor:
+    """
+    Computes the Maximum Mean Discrepancy (MMD) between two batches x and y.
+    Args:
+        x: Tensor of shape (n_samples_x, n_features)
+        y: Tensor of shape (n_samples_y, n_features)
+        kernel: Kernel type ('rbf' only supported)
+        sigma: Bandwidth for the RBF kernel
+    Returns:
+        Scalar tensor with the MMD value
+    """
+    def rbf_kernel(a, b, sigma):
+        a_norm = (a ** 2).sum(dim=1).unsqueeze(1)
+        b_norm = (b ** 2).sum(dim=1).unsqueeze(0)
+        dist = a_norm + b_norm - 2.0 * torch.mm(a, b.t())
+        return torch.exp(-dist / (2 * sigma ** 2))
+
+    xx = rbf_kernel(x, x, sigma)
+    yy = rbf_kernel(y, y, sigma)
+    xy = rbf_kernel(x, y, sigma)
+
+    mmd = xx.mean() + yy.mean() - 2 * xy.mean()
+    return mmd
