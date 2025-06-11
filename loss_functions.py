@@ -1,6 +1,8 @@
 import torch
+from functools import partial
 
 from utils import maximum_mean_discrepancy as mmd
+from data import rig_to_anchor
 
 
 class LittleNIKILoss(torch.nn.Module):
@@ -14,8 +16,11 @@ class LittleNIKILoss(torch.nn.Module):
     def forward_loss(self, anchor_preds, anchor_labels):
         return torch.pow(anchor_preds - anchor_labels, 2).mean()
 
-    def inverse_loss(self, rig_preds, rig_labels):
-        return torch.pow(rig_preds - rig_labels, 2).mean()
+    def inverse_loss(self, rig_preds, rig_labels, fk_model=None):
+        loss = torch.pow(rig_preds - rig_labels, 2).mean()
+        if fk_model is not None:
+            loss += torch.abs(fk_model(rig_preds) - fk_model(rig_labels)).mean()
+        return loss
 
     def forward_boundary_loss(self, anchor_preds_bnd, anchor_labels):
         return torch.pow(anchor_preds_bnd - anchor_labels, 2).mean()
@@ -42,10 +47,3 @@ class LittleNIKILoss(torch.nn.Module):
         print(f'mmd_z: {mmd_z}')
         return mmd_joint_marginal + mmd_z
         
-
-
-    def niki_loss(self, anchor_preds, anchor_preds_bnd, anchor_labels, rig_preds, rig_preds_bnd, rig_labels, error_latent):
-        return self.lambda_fwd * self.forward_loss(anchor_preds, anchor_labels) + \
-               self.lambda_inv * self.inverse_loss(rig_preds, rig_labels) +\
-               self.lambda_fwd_bnd * self.forward_boundary_loss(anchor_preds_bnd, anchor_labels) + \
-               self.lambda_inv_bnd * self.inverse_boundary_loss(rig_preds_bnd, rig_labels, error_latent)
