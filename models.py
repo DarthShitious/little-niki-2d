@@ -20,7 +20,7 @@ def build_inn(num_segments: int):
     """
     dim = (num_segments + 1) * 4
     nodes = [InputNode(dim, name='input')]
-    for _ in range(12):
+    for _ in range(6):
         nodes.append(Node(nodes[-1], RNVPCouplingBlock, {'subnet_constructor': subnet_fc}))
         nodes.append(Node(nodes[-1], PermuteRandom, {'seed': 0}))
     nodes.append(OutputNode(nodes[-1], name='output'))

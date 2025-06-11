@@ -250,11 +250,20 @@ class Trainer:
             rig_recon = rig_recon_latent_error[:, :self.num_segments]
             error_latent_recon = rig_recon_latent_error[:, self.num_segments:]
 
+            anchor_noise = anchor_labels + torch.randn_like(anchor_labels) * 0.1
+            rig_noise, ljd_noise = self.model.inverse(anchor_noise.to(self.device))
+
             if save_dir is not None:
                 os.makedirs(save_dir, exist_ok=True)
                 filename = os.path.join(save_dir, f"rig_recon.png")
                 plt.savefig(filename)
             plot_rigs(rigs=[rig_inputs[0], rig_recon[0], rig_fal[0]], lengths=lengths, save_path=filename)
+
+            if save_dir is not None:
+                os.makedirs(save_dir, exist_ok=True)
+                filename = os.path.join(save_dir, f"rig_recon_noise.png")
+                plt.savefig(filename)
+            plot_rigs(rigs=[rig_inputs[0], rig_noise[0]], lengths=lengths, save_path=filename)
 
 
     @property
