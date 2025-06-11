@@ -25,6 +25,27 @@ if __name__ == "__main__":
     with open('config.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
+    # Armature segment lengths
+    lengths_value = config["LENGTHS"]
+    num_segments = config["NUM_SEGMENTS"]
+
+    assert isinstance(lengths_value, (str, int, float)), \
+        f"Invalid type for LENGTHS: expected str, int, or float, got {type(lengths_value).__name__}"
+
+    if isinstance(lengths_value, str):
+        if lengths_value.lower() == "random":
+            print("[INFO] Generating random segment lengths from 0.01 to 0.1!")
+            lengths = np.random.uniform(0.01, 0.1, size=num_segments)
+        else:
+            print(f"[WARNING] Unrecognized LENGTHS string '{lengths_value}'. Defaulting to uniform lengths of 0.1.")
+            lengths = np.full(num_segments, 0.1)
+    else:
+        # lengths_value is a number (int or float)
+        lengths = np.full(num_segments, lengths_value)
+
+    # Add lengths to config for downstream use
+    config["LENGTHS_ARRAY"] = lengths
+
     # Set the seed
     set_seed(config["SEED"])
 
@@ -57,25 +78,6 @@ if __name__ == "__main__":
         optimizer=optimizer,
         scheduler=scheduler
     )
-
-    # Armature segment lengths
-    lengths_value = config["LENGTHS"]
-    num_segments = config["NUM_SEGMENTS"]
-
-    assert isinstance(lengths_value, (str, int, float)), \
-        f"Invalid type for LENGTHS: expected str, int, or float, got {type(lengths_value).__name__}"
-
-    if isinstance(lengths_value, str):
-        if lengths_value.lower() == "random":
-            print("[INFO] Generating random segment lengths from 0.01 to 0.1!")
-            lengths = np.random.uniform(0.01, 0.1, size=num_segments)
-        else:
-            print(f"[WARNING] Unrecognized LENGTHS string '{lengths_value}'. Defaulting to uniform lengths of 0.1.")
-            lengths = np.full(num_segments, 0.1)
-    else:
-        # lengths_value is a number (int or float)
-        lengths = np.full(num_segments, lengths_value)
-
 
     # Training loop
     for epoch in range(1, config["NUM_EPOCHS"] + 1):
