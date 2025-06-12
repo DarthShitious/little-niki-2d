@@ -39,5 +39,20 @@ def maximum_mean_discrepancy(x: torch.Tensor, y: torch.Tensor, kernel='rbf', sig
     yy = rbf_kernel(y, y, sigma)
     xy = rbf_kernel(x, y, sigma)
 
-    mmd = xx.mean() + yy.mean() - 2 * xy.mean()
+    # Filter out infinites
+    xx = xx[torch.isfinite(xx)]
+    yy = yy[torch.isfinite(yy)]
+    xy = xy[torch.isfinite(xy)]
+
+    # Ignore NaNs
+    mmd = xx.nanmean() + yy.nanmean() - 2 * xy.nanmean()
+
     return mmd
+
+
+def loss_compressor(loss, thresh=10, slope=1e-5):
+
+    if loss < thresh:
+        return loss
+    else:
+        return thresh * (1 - slope) + slope * loss

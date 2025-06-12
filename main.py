@@ -53,7 +53,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Instantiate model
-    model = build_inn(config["NUM_SEGMENTS"]).to(device)
+    model = build_inn(config).to(device)
     print(f"Learnable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Define optimizer
@@ -123,4 +123,4 @@ if __name__ == "__main__":
 
             trainer.plot_scatter(save_dir=os.path.join(results_dir, f"{epoch:04d}", "pred_label_scatter"))
 
-            trainer.plot_analysis(dataloader=val_loader, lengths=lengths, save_dir=os.path.join(results_dir, f"{epoch:04d}", "rigs"))
+            trainer.plot_analysis(dataloader=val_loader, lengths=lengths, save_dir=os.path.join(results_dir, f"{epoch:04d}", "analysis"))

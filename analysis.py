@@ -96,7 +96,7 @@ def plot_rig_roundtrip_noise(rig_labels, inn_model, lengths, save_path=None, num
         plt.close()
 
 
-def plot_rigs(rigs: List, lengths, title=None, save_path=None):
+def plot_rigs(rigs: List, labels: List, lengths, title=None, save_path=None):
 
     if not isinstance(rigs, List):
         rigs = [rigs]
@@ -112,13 +112,14 @@ def plot_rigs(rigs: List, lengths, title=None, save_path=None):
             angle += rig_vector[j]
             x.append(x[-1] + lengths[j] * np.cos(angle))
             y.append(y[-1] + lengths[j] * np.sin(angle))
-        plt.plot(x, y, '-o', linewidth=2, markersize=8, label=f"Rig {idx:d}")
+        plt.plot(x, y, '-o', linewidth=2, markersize=8, label=labels[idx])
     plt.axis('equal')
     if title:
         plt.title(title)
     plt.xlabel('x')
     plt.ylabel('y')
     plt.legend()
+    plt.grid('both')
     if save_path is not None:
         plt.savefig(save_path)
     else:

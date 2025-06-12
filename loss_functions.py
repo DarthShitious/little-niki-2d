@@ -46,4 +46,3 @@ class LittleNIKILoss(torch.nn.Module):
         print(f'mmd_joint_marginal: {mmd_joint_marginal}')
         print(f'mmd_z: {mmd_z}')
         return mmd_joint_marginal + mmd_z
-        
