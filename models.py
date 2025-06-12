@@ -1,14 +1,24 @@
 import torch.nn as nn
 from functools import partial
 from FrEIA.framework import InputNode, OutputNode, Node, ReversibleGraphNet
-from FrEIA.modules import RNVPCouplingBlock, PermuteRandom
+from FrEIA.modules import RNVPCouplingBlock, PermuteRandom, ActNorm
 
 def subnet_fc(in_ch, out_ch, hid_ch):
+    class MyActNorm(nn.Module):
+        def __init__(self, ch):
+            super().__init__()
+            self.actnorm = ActNorm(((ch,),))
+        def forward(self, x):
+            out, _ = self.actnorm([x])
+            return out[0]
     return nn.Sequential(
         nn.Linear(in_ch, hid_ch),
+        MyActNorm(hid_ch),
         nn.ReLU(),
         nn.Linear(hid_ch, out_ch)
     )
+
+
 
 def build_inn(config: dict):
     """
